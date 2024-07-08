@@ -1,0 +1,37 @@
+body {
+  margin: 0;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  background-color: #333;
+  color: white;
+  font-family: Arial, sans-serif;
+}
+
+#canvas {
+  width: 100vw;
+  height: 100vh;
+  display: block;
+}
+
+#uiContainer {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+
+#ui {
+  background-color: rgba(0, 0, 0, 0.7);
+  padding: 10px;
+  border-radius: 5px;
+}
+
+#ui div {
+  margin: 5px 0;
+}
+
+.time {
+  font-weight: bold;
+}

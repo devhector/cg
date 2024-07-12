@@ -94,7 +94,7 @@ async function main() {
 		objHrefs.map(href => loadObjModel(gl, meshProgramInfo, href))
 	);
 
-	const near = 5, far = 10000;
+	const near = 5, far = 10000, objLength = 2;
 	
 	let worldMatrix = [], worldLength = 10;
 	let worldCenter = [worldLength / 2, 0, worldLength / 2];
@@ -105,8 +105,12 @@ async function main() {
 
 	for (let i = 0; i < worldLength; i++) {
 		for (let j = 0; j < worldLength; j++) {
+			let u_world = m4.translation(i * objLength, 0, j * objLength);
+			u_world = m4.yRotate(u_world, ((j) % 2) * Math.PI);
+
+
 			worldMatrix.push(
-				{obj: objs[i % objs.length], position: [i * 2, 0, j * 2]}
+				{obj: objs[i % objs.length], u_world}
 			);
 		}
 	}
@@ -148,19 +152,16 @@ async function main() {
 		// calls gl.uniform
 		twgl.setUniforms(meshProgramInfo, sharedUniforms);
 
-		for (const {obj, position} of worldMatrix) {
-			renderObj(obj, position, time);
+		for (const {obj, u_world} of worldMatrix) {
+			renderObj(obj, u_world);
 		}
 
 		requestAnimationFrame(render);
 	}
 	requestAnimationFrame(render);
 
-	function renderObj(obj, position) {
+	function renderObj(obj, u_world) {
 		const { parts } = obj;
-
-		let u_world = m4.identity();
-		u_world = m4.translate(u_world, ...position);
 	
 		for (const {bufferInfo, vao, material} of parts) {
 			gl.bindVertexArray(vao);

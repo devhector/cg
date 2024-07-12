@@ -63,9 +63,8 @@ async function loadObjModel(gl, meshProgramInfo, objPath) {
 	});
 
 	const extents = getGeometriesExtents(obj.geometries);
-	let range, offset;
 	// debugger;
-	return { parts, range, offset, extents };
+	return { parts };
 }
 
 function parseOBJ(text) {

@@ -81,42 +81,135 @@ async function main() {
 	// compiles and links the shaders, looks up attribute and uniform locations
 	const meshProgramInfo = twgl.createProgramInfo(gl, [vs, fs]);
 
-	let objHrefs = [
-		'./assets/building_G.obj',
+	let buildingsPath = [
+		'./assets/base.obj',
 		'./assets/building_A.obj',
 		'./assets/building_B.obj',
 		'./assets/building_C.obj',
 		'./assets/building_D.obj',
-		'./assets/road_tsplit.obj',
+		'./assets/building_E.obj',
+		'./assets/building_F.obj',
+		'./assets/building_G.obj',
+		'./assets/building_H.obj',
 	];
-  
-	let objs = await Promise.all(
-		objHrefs.map(href => loadObjModel(gl, meshProgramInfo, href))
-	);
+
+	let roadsPath = [
+		'./assets/road_tsplit.obj',
+		'./assets/road_junction.obj',
+		'./assets/road_corner.obj',
+		'./assets/road_straight.obj',
+	]
+
+	let othersObjPath = [
+		'./assets/bush.obj',
+		'./assets/trafficlight_A.obj',
+		'./assets/bench.obj',
+	];
+
+	const objs = {
+		buildings: await Promise.all(
+			buildingsPath.map(path => loadObjModel(gl, meshProgramInfo, path))
+		),
+		roads: await Promise.all(
+			roadsPath.map(path => loadObjModel(gl, meshProgramInfo, path))
+		),
+		others: await Promise.all(
+			othersObjPath.map(path => loadObjModel(gl, meshProgramInfo, path))
+		),
+	}
+
+	let rotate = 0;
+	let randomRoads, roadsProbability = 0.7;
+	let worldMatrix = [], worldLength = 5, cameraDistance = 15;
 
 	const near = 5, far = 10000, objLength = 2;
-	
-	let worldMatrix = [], worldLength = 10;
-	let worldCenter = [worldLength / 2, 0, worldLength / 2];
-	let cameraDistance = 20;
-	let cameraPosition = [(worldLength / 2), 10, (worldLength / 2) + cameraDistance];
-	let cameraTarget = worldCenter;
+	const PI = Math.PI, rotate90 = PI / 2, rotate180 = PI, rotate270 = PI * 1.5;
 
+	function generateWorldMatrix() {
+		randomRoads = new Set();
+		const numRandomRoads = Math.floor(worldLength * 2);
+		let attempts = 0, maxAttempts = worldLength * 10, roads = 0;
 
-	for (let i = 0; i < worldLength; i++) {
-		for (let j = 0; j < worldLength; j++) {
-			let u_world = m4.translation(i * objLength, 0, j * objLength);
-			u_world = m4.yRotate(u_world, ((j) % 2) * Math.PI);
+		while (roads < numRandomRoads && attempts < maxAttempts) {
+			attempts++;
+			if(Math.random() < roadsProbability) {
+				let axis = Math.random() < 0.5 ? 'row' : 'col';
+				let pos = Math.floor(Math.random() * (worldLength - 2)) + 2;
+				
+				if (axis === 'row') {
+					if (!randomRoads.has(`row${pos-1}`) && !randomRoads.has(`row${pos+1}`) && !isNearEdge()) {
+						randomRoads.add(`row${pos}`);
+					}
+				} else {
+					if (!randomRoads.has(`col${pos-1}`) && !randomRoads.has(`col${pos+1}`) && !isNearEdge()) {
+						randomRoads.add(`col${pos}`);
+					}
+				}
 
+				function isNearEdge() {
+					return (pos <= 1 || pos >= worldLength - 2)
+				}
+			}
+			roads++;
+		}
 
-			worldMatrix.push(
-				{obj: objs[i % objs.length], u_world}
-			);
+		for (let i = 0; i < worldLength; i++) {
+			for (let j = 0; j < worldLength; j++) {
+				let u_world = m4.translation(i * objLength, 0, j * objLength), obj;
+
+				// debugger;
+				if (isCornerRoad(i, j)) {
+					({obj, u_world} = setRoadCorner(i, j));
+				}
+				else if (isEdgeIntersection(i, j)) {
+					obj = objs.roads[0]; // road_tsplit
+					u_world = rotateForEdgeIntersection(i, j, u_world);
+				}
+				else if (isCrossing(i, j)) {
+					obj = objs.roads[1]; // road_junction
+					if(Math.random() < 0.5) u_world = m4.yRotate(u_world, rotate90);
+				}
+				else if (isEdge(i) || isEdge(j)) {
+					obj = objs.roads[3]; // road_straight
+					if (isEdge(j)) u_world = m4.yRotate(u_world, rotate90);
+				}
+				else if (randomRoads.has(`row${i}`) || randomRoads.has(`col${j}`)) {
+					obj = objs.roads[3];
+					if (randomRoads.has(`col${j}`)) u_world = m4.yRotate(u_world, rotate90);
+				}
+				else {
+					obj = chooseRandom(objs.buildings);
+					
+					// debugger;
+
+					if (i > 0 && isRoad(i - 1, j)) {
+						// Estrada acima
+						u_world = m4.yRotate(u_world, rotate270);
+					}
+					else if (j < worldLength - 1 && isRoad(i, j + 1)) {
+						// Estrada a direita
+						u_world = m4.yRotate(u_world, 0);
+					}
+					else if (j > 0 && isRoad(i, j - 1)) {
+						// Estrada a esquerda
+						u_world = m4.yRotate(u_world, rotate180);
+					}
+					else if (i < worldLength - 1 && isRoad(i + 1, j)) {
+						// Estrada abaixo
+						u_world = m4.yRotate(u_world, rotate90);
+					} 
+				}
+
+				// debugger;
+				worldMatrix.push({obj, u_world});
+			}
 		}
 	}
 
+	generateWorldMatrix();
+
 	function render(time) {
-		time *= 0.0001;
+		time *= 0.0002;
 	
 		twgl.resizeCanvasToDisplaySize(gl.canvas);
 		gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
@@ -127,17 +220,17 @@ async function main() {
 		const projection = m4.perspective(fieldOfViewRadians, aspect, near, far);
 	
 		const up = [0, 1, 0];
-		const orbitRadius = cameraDistance;
-		const cameraAngleRadians = time;
-		cameraPosition = [
-			worldCenter[0] + Math.cos(cameraAngleRadians) * orbitRadius,
-			6,
-			worldCenter[2] + Math.sin(cameraAngleRadians) * orbitRadius,
+		const worldCenter = worldLength * objLength / 2;
+
+		let cameraTarget = [worldCenter, 0, worldCenter];
+		let rotation = time;
+		let cameraPosition = [
+		worldCenter + Math.cos(rotation) * cameraDistance,
+		cameraDistance / 3,
+		worldCenter + Math.sin(rotation) * cameraDistance
 		];
 
 		const camera = m4.lookAt(cameraPosition, cameraTarget, up);
-	
-		// Make a view matrix from the camera matrix.
 		const view = m4.inverse(camera);
 	
 		const sharedUniforms = {
@@ -148,8 +241,6 @@ async function main() {
 		};
 	
 		gl.useProgram(meshProgramInfo.program);
-	
-		// calls gl.uniform
 		twgl.setUniforms(meshProgramInfo, sharedUniforms);
 
 		for (const {obj, u_world} of worldMatrix) {
@@ -158,11 +249,11 @@ async function main() {
 
 		requestAnimationFrame(render);
 	}
-	requestAnimationFrame(render);
+
 
 	function renderObj(obj, u_world) {
 		const { parts } = obj;
-	
+		// debugger;
 		for (const {bufferInfo, vao, material} of parts) {
 			gl.bindVertexArray(vao);
 			twgl.setUniforms(meshProgramInfo, {
@@ -172,6 +263,99 @@ async function main() {
 			twgl.drawBufferInfo(gl, bufferInfo);
 		}
 	}
+
+	function chooseRandom(list) {
+		return list[Math.floor(Math.random() * list.length)];
+	}
+
+	function isRoad(i, j) {
+		return randomRoads.has(`row${i}`) || randomRoads.has(`col${j}`) || isEdge(i) || isEdge(j);
+	}
+
+	function isEdgeIntersection(i, j) {
+		return (isEdge(i) && randomRoads.has(`col${j}`)) ||
+			(isEdge(j) && randomRoads.has(`row${i}`));
+	}
+	
+	function isCrossing(i, j) {
+		return randomRoads.has(`row${i}`) && randomRoads.has(`col${j}`);
+	}
+
+	function rotateForEdgeIntersection(i, j, u_world) {
+		if (isEdge(i) && randomRoads.has(`col${j}`)) {
+			if (i == 0) return u_world;
+			return m4.yRotate(u_world, rotate180);
+		}
+		else if (isEdge(j) && randomRoads.has(`row${i}`)) {
+			if(j == 0) return m4.yRotate(u_world, rotate270);
+			return m4.yRotate(u_world, rotate90);
+		}
+		return u_world;
+	}
+
+	function isEdge(x) {
+		return x == 0 || x == worldLength - 1;
+	}
+
+	function isCornerRoad(i, j) {
+		return (i == 0 && j == 0)
+		|| (i == worldLength - 1 && j == 0)
+		|| (i == 0 && j == worldLength - 1)
+		|| (i == worldLength - 1 && j == worldLength - 1);
+	}
+
+	function setRoadCorner(i, j) {
+		let obj = objs.roads[2],
+		u_world = m4.translation(i * objLength, 0, j * objLength);
+
+		if (i == 0 && j == 0) {
+			return {obj, u_world};
+		} else if (i == worldLength - 1 && j == 0) {
+			return {obj, u_world: m4.yRotate(u_world, rotate270)};
+		} else if (i == worldLength - 1 && j == worldLength - 1) {
+			return {obj, u_world: m4.yRotate(u_world, rotate180)};
+		} else if (i == 0 && j == worldLength - 1) {
+			return {obj, u_world: m4.yRotate(u_world, rotate90)};
+		}
+	}
+
+	webglLessonsUI.setupSlider("#mapLength",
+		{value: worldLength, slide: updateWorldLength, min: 5, max: 100}
+		);
+	
+		function updateWorldLength(event, ui) {
+			worldLength = ui.value;
+			worldMatrix = [];
+			generateWorldMatrix();
+		}
+	
+		webglLessonsUI.setupSlider("#cameraDistance",
+		{value: cameraDistance, slide: updateCameraDistance, min: 10, max: 100}
+		);
+	
+		function updateCameraDistance(event, ui) {
+			cameraDistance = ui.value;
+		}
+	
+		webglLessonsUI.setupSlider("#roadsProbability",
+		{value: roadsProbability * 100, slide: updateRoadsProbability, min: 0, max: 100}
+		);
+	
+		function updateRoadsProbability(event, ui) {
+			roadsProbability = ui.value / 100;
+			worldMatrix = [];
+			generateWorldMatrix();
+		}
+
+		webglLessonsUI.setupSlider("#rotate",
+		{value: rotate, slide: updateRotate, min: 0, max: 2 * Math.PI}
+		);
+
+		function updateRotate(event, ui) {
+			rotate = ui.value;
+		}
+
+	requestAnimationFrame(render);
 }
 
 

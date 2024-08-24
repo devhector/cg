@@ -31,16 +31,7 @@ async function loadObjModel(gl, meshProgramInfo, objPath) {
 		  material[key] = texture;
 		});
 	}
-  
-	const defaultMaterial = {
-	  diffuse: [1, 1, 1],
-	  diffuseMap: textures.defaultWhite,
-	  ambient: [0, 0, 0],
-	  specular: [1, 1, 1],
-	  shininess: 400,
-	  opacity: 1,
-	};
-  
+
 	const parts = obj.geometries.map(({ material, data }) => {
 	  if (data.color) {
 		if (data.position.length === data.color.length) {
@@ -54,7 +45,6 @@ async function loadObjModel(gl, meshProgramInfo, objPath) {
 	  const vao = twgl.createVAOFromBufferInfo(gl, meshProgramInfo, bufferInfo);
 	  return {
 		material: {
-		  ...defaultMaterial,
 		  ...materials[material],
 		},
 		bufferInfo,

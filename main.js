@@ -68,6 +68,28 @@ const vs = `#version 300 es
 	}
 	`;
 
+	const depthVS = `#version 300 es
+	in vec4 a_position;
+
+	uniform mat4 u_projection;
+	uniform mat4 u_view;
+	uniform mat4 u_world;
+
+	void main() {
+		gl_Position = u_projection * u_view * u_world * a_position;
+	}
+	`;
+
+	const depthFS = `#version 300 es
+	precision highp float;
+
+	out float fragDepth;
+
+	void main() {
+		fragDepth = gl_FragCoord.z;
+	}
+	`;
+
 async function main() {
 	const canvas = document.querySelector("#canvas");
 	const gl = canvas.getContext("webgl2");
@@ -80,6 +102,7 @@ async function main() {
 
 	// compiles and links the shaders, looks up attribute and uniform locations
 	const meshProgramInfo = twgl.createProgramInfo(gl, [vs, fs]);
+	const depthProgramInfo = twgl.createProgramInfo(gl, [depthVS, depthFS]);
 
 	let buildingsPath = [
 		'./assets/base.obj',
@@ -122,8 +145,25 @@ async function main() {
 	let randomRoads, roadsProbability = 0.7;
 	let worldMatrix = [], worldLength = 5, cameraDistance = 15;
 
-	const near = 5, far = 10000, objLength = 2;
+	const near = 5, far = 250, objLength = 2;
 	const PI = Math.PI, rotate90 = PI / 2, rotate180 = PI, rotate270 = PI * 1.5;
+
+	const depthTextureSize = 2048;
+	const depthTexture = gl.createTexture();
+
+	gl.bindTexture(gl.TEXTURE_2D, depthTexture);
+	gl.texImage2D(gl.TEXTURE_2D, 0, 
+		gl.DEPTH_COMPONENT32F, depthTextureSize,
+		depthTextureSize, 0, gl.DEPTH_COMPONENT, gl.FLOAT, null
+	);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+	const depthFramebuffer = gl.createFramebuffer();
+	gl.bindFramebuffer(gl.FRAMEBUFFER, depthFramebuffer);
+	gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, depthTexture, 0);
 
 	function generateWorldMatrix() {
 		randomRoads = new Set();
@@ -232,12 +272,22 @@ async function main() {
 
 		const camera = m4.lookAt(cameraPosition, cameraTarget, up);
 		const view = m4.inverse(camera);
+
+		const lightPosition = [worldCenter, 20, worldCenter];
+		const lightTarget = [worldCenter, 0, worldCenter];
+		const lightDirection = m4.normalize(m4.subtractVectors(lightPosition, lightTarget));
+
+		const lightProjectionMatrix = m4.perspective(fieldOfViewRadians, 1, 1, 100);
+		const lightViewMatrix = m4.lookAt(lightPosition, lightTarget, up);
+
+		renderShadowMap(lightProjectionMatrix, lightViewMatrix);
 	
 		const sharedUniforms = {
-			u_lightDirection: m4.normalize([-1, 3, 5]),
+			u_lightDirection: lightDirection,
 			u_view: view,
 			u_projection: projection,
 			u_viewWorldPosition: cameraPosition,
+			u_shadowMap: depthTexture,
 		};
 	
 		gl.useProgram(meshProgramInfo.program);
@@ -262,6 +312,31 @@ async function main() {
 	
 			twgl.drawBufferInfo(gl, bufferInfo);
 		}
+	}
+
+	function renderShadowMap(lightProjectionMatrix, lightViewMatrix) {
+		gl.bindFramebuffer(gl.FRAMEBUFFER, depthFramebuffer);
+		gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+		gl.clear(gl.DEPTH_BUFFER_BIT);
+
+		gl.useProgram(depthProgramInfo.program);
+		twgl.setUniforms(depthProgramInfo, {
+			u_projection: lightProjectionMatrix,
+			u_view: lightViewMatrix,
+		});
+
+		for (const {obj, u_world} of worldMatrix) {
+			const { parts } = obj;
+			for (const {bufferInfo, vao} of parts) {
+				gl.bindVertexArray(vao);
+				twgl.setUniforms(depthProgramInfo, {
+					u_world,
+				});
+				twgl.setBuffersAndAttributes(gl, depthProgramInfo, bufferInfo);
+				twgl.drawBufferInfo(gl, bufferInfo);
+			}
+		}
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 	}
 
 	function chooseRandom(list) {

@@ -1,6 +1,6 @@
 lista do que não funciona:
 - Não utilizei nenhum ruido para gerar o cenario
-
+- Não implementei uma forma de controlar a densidade de predios
 
 lista do que funciona:
 - A cena esta sendo gerada de forma aleatoria de acordo com o tamanho do terreno

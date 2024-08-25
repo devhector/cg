@@ -10,11 +10,15 @@ const vs = `#version 300 es
 	uniform mat4 u_view;
 	uniform mat4 u_world;
 	uniform vec3 u_viewWorldPosition;
+	uniform mat4 u_lightProjection;
+	uniform mat4 u_lightView;
+
   
 	out vec3 v_normal;
 	out vec3 v_surfaceToView;
 	out vec2 v_texcoord;
 	out vec4 v_color;
+	out vec4 v_shadowCoord;
   
 	void main() {
 	  vec4 worldPosition = u_world * a_position;
@@ -23,6 +27,7 @@ const vs = `#version 300 es
 	  v_normal = mat3(u_world) * a_normal;
 	  v_texcoord = a_texcoord;
 	  v_color = a_color;
+	  v_shadowCoord =  u_lightView * u_world * a_position;
 	}
 	`;
   
@@ -33,6 +38,7 @@ const vs = `#version 300 es
 	in vec3 v_surfaceToView;
 	in vec2 v_texcoord;
 	in vec4 v_color;
+	in vec4 v_shadowCoord;
   
 	uniform vec3 diffuse;
 	uniform sampler2D diffuseMap;
@@ -41,28 +47,55 @@ const vs = `#version 300 es
 	uniform vec3 specular;
 	uniform float shininess;
 	uniform float opacity;
-	uniform vec3 u_lightDirection;
+	// uniform vec3 u_lightDirection;
 	uniform vec3 u_ambientLight;
+	uniform sampler2D u_shadowMap;
   
 	out vec4 outColor;
-  
+
+	float getShadow(vec4 shadowCoord) {
+		vec3 projCoords = shadowCoord.xyz / shadowCoord.w;
+		projCoords = projCoords * 0.5 + 0.5;  // Transform to [0, 1] range
+
+		if (projCoords.x < 0.0 || projCoords.x > 1.0 || projCoords.y < 0.0 || projCoords.y > 1.0) {
+			return 1.0;
+		}
+
+		float currentDepth = projCoords.z - 0.0006;
+
+		float shadow = 0.0;
+		vec2 texelSize = 1.0 / vec2(textureSize(u_shadowMap, 0)); 
+
+		for (int x = -2; x <= 2; x++) {
+			for (int y = -2; y <= 2; y++) {
+				float pcfDepth = texture(u_shadowMap, projCoords.xy + vec2(x, y) * texelSize).r;
+				shadow += currentDepth > pcfDepth ? 0.5 : 1.0;
+			}
+		}
+		shadow /= 25.0;
+
+		return shadow;
+	}
+
 	void main () {
 	  vec3 normal = normalize(v_normal);
   
 	  vec3 surfaceToViewDirection = normalize(v_surfaceToView);
-	  vec3 halfVector = normalize(u_lightDirection + surfaceToViewDirection);
+	  vec3 halfVector = normalize(surfaceToViewDirection);
   
-	  float fakeLight = dot(u_lightDirection, normal) * .5 + .5;
 	  float specularLight = clamp(dot(normal, halfVector), 0.0, 1.0);
   
 	  vec4 diffuseMapColor = texture(diffuseMap, v_texcoord);
 	  vec3 effectiveDiffuse = diffuse * diffuseMapColor.rgb * v_color.rgb;
 	  float effectiveOpacity = opacity * diffuseMapColor.a * v_color.a;
+
+	  vec4 shadowCoord = v_shadowCoord / v_shadowCoord.w;
+	  float shadow = getShadow(shadowCoord);
   
 	  outColor = vec4(
 		  emissive +
 		  ambient * u_ambientLight +
-		  effectiveDiffuse * fakeLight +
+		  effectiveDiffuse * shadow +
 		  specular * pow(specularLight, shininess),
 		  effectiveOpacity);
 	}
@@ -71,12 +104,12 @@ const vs = `#version 300 es
 	const depthVS = `#version 300 es
 	in vec4 a_position;
 
-	uniform mat4 u_projection;
-	uniform mat4 u_view;
+	uniform mat4 u_lightProjection;
+	uniform mat4 u_lightView;
 	uniform mat4 u_world;
 
 	void main() {
-		gl_Position = u_projection * u_view * u_world * a_position;
+		gl_Position = u_lightProjection * u_lightView * u_world * a_position;
 	}
 	`;
 
@@ -164,6 +197,7 @@ async function main() {
 	const depthFramebuffer = gl.createFramebuffer();
 	gl.bindFramebuffer(gl.FRAMEBUFFER, depthFramebuffer);
 	gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, depthTexture, 0);
+	gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
 	function generateWorldMatrix() {
 		randomRoads = new Set();
@@ -277,16 +311,18 @@ async function main() {
 		const lightTarget = [worldCenter, 0, worldCenter];
 		const lightDirection = m4.normalize(m4.subtractVectors(lightPosition, lightTarget));
 
-		const lightProjectionMatrix = m4.perspective(fieldOfViewRadians, 1, 1, 100);
+		const lightProjectionMatrix = m4.orthographic(fieldOfViewRadians, 1, near, far);
 		const lightViewMatrix = m4.lookAt(lightPosition, lightTarget, up);
 
 		renderShadowMap(lightProjectionMatrix, lightViewMatrix);
 	
 		const sharedUniforms = {
-			u_lightDirection: lightDirection,
+			// u_lightDirection: lightDirection,
 			u_view: view,
 			u_projection: projection,
 			u_viewWorldPosition: cameraPosition,
+			u_lightProjection: lightProjectionMatrix,
+			u_lightView: lightViewMatrix,
 			u_shadowMap: depthTexture,
 		};
 	
@@ -321,8 +357,8 @@ async function main() {
 
 		gl.useProgram(depthProgramInfo.program);
 		twgl.setUniforms(depthProgramInfo, {
-			u_projection: lightProjectionMatrix,
-			u_view: lightViewMatrix,
+			u_lightProjection: lightProjectionMatrix,
+			u_lightView: lightViewMatrix,
 		});
 
 		for (const {obj, u_world} of worldMatrix) {

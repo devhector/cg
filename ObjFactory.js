@@ -52,7 +52,6 @@ async function loadObjModel(gl, meshProgramInfo, objPath) {
 	  };
 	});
 
-	const extents = getGeometriesExtents(obj.geometries);
 	// debugger;
 	return { parts };
 }
